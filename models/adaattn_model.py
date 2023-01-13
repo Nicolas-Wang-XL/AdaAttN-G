@@ -3,6 +3,7 @@ import torch.nn as nn
 import itertools
 from .base_model import BaseModel
 from . import networks
+import numpy as np
 
 
 class AdaAttNModel(BaseModel):
@@ -19,6 +20,8 @@ class AdaAttNModel(BaseModel):
             parser.add_argument('--lambda_global', type=float, default=10., help='weight for L2 style loss')
             parser.add_argument('--lambda_local', type=float, default=3.,
                                 help='weight for attention weighted style loss')
+            parser.add_argument('--lambda_edge', type=float, default=0.002,
+                                help='weight for content edge loss')
         return parser
 
     def __init__(self, opt):
@@ -89,7 +92,7 @@ class AdaAttNModel(BaseModel):
         for layer in self.image_encoder_layers:
             for param in layer.parameters():
                 param.requires_grad = False
-        self.visual_names = ['c', 'cs', 's']
+        self.visual_names = ['c', 'cs', 's', 'edge_c', 'edge_cs', 'edge_s']
         self.model_names = ['decoder', 'transformer']
         parameters = []
         self.max_sample = 64 * 64
@@ -113,17 +116,29 @@ class AdaAttNModel(BaseModel):
         self.c = None
         self.cs = None
         self.s = None
+        self.edge_c = None
+        self.edge_cs = None
+        self.edge_s = None
         self.s_feats = None
         self.c_feats = None
         self.seed = 6666
         if self.isTrain:
-            self.loss_names = ['content', 'global', 'local']
+            self.loss_names = ['content', 'global', 'local', 'edge']
             self.criterionMSE = torch.nn.MSELoss().to(self.device)
             self.optimizer_g = torch.optim.Adam(itertools.chain(*parameters), lr=opt.lr)
             self.optimizers.append(self.optimizer_g)
             self.loss_global = torch.tensor(0., device=self.device)
             self.loss_local = torch.tensor(0., device=self.device)
             self.loss_content = torch.tensor(0., device=self.device)
+            self.loss_edge = torch.tensor(0., device=self.device)
+
+            self.conv_op_x = nn.Conv2d(1, 1, kernel_size=3, padding=1, bias=False, device=self.device).requires_grad_(False)
+            self.conv_op_y = nn.Conv2d(1, 1, kernel_size=3, padding=1, bias=False, device=self.device).requires_grad_(False)
+            sobel_x = torch.Tensor([[[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]]]).to(self.device)
+            sobel_y = torch.Tensor([[[[1, 2, 1], [0, 0, 0], [-1, -2, -1]]]]).to(self.device)
+            print(self.conv_op_y.weight.data.shape, sobel_x.shape)
+            self.conv_op_x.weight.data = sobel_x
+            self.conv_op_y.weight.data = sobel_y
 
     def set_input(self, input_dict):
         self.c = input_dict['c'].to(self.device)
@@ -208,20 +223,53 @@ class AdaAttNModel(BaseModel):
                 std = std.view(b, h_c, w_c, -1).permute(0, 3, 1, 2).contiguous()
                 self.loss_local += self.criterionMSE(stylized_feats[i], std * networks.mean_variance_norm(self.c_feats[i]) + mean)
 
+    def rgb2gray(self, rgb_img):
+
+        gray = 0.299*rgb_img[:,0,:,:]+0.587*rgb_img[:,1,:,:]+0.114*rgb_img[:,2,:,:]
+        return gray.unsqueeze(1)
+
+    def edge_detection(self, gray_img):
+        # gx = self.conv_op_x(gray_img)
+        # gy = self.conv_op_y(gray_img)
+        return torch.abs(self.conv_op_x(gray_img))+torch.abs(self.conv_op_y(gray_img))
+
+    def edge_losses(self):
+        self.loss_edge = torch.tensor(0., device=self.device)
+        # zhuanhundu
+        self.edge_c = self.rgb2gray(self.c)
+        self.edge_s = self.rgb2gray(self.s)
+        self.edge_cs = self.rgb2gray(self.cs)
+
+        # panbian
+        self.edge_c = self.edge_detection(self.edge_c)
+        self.edge_s = self.edge_detection(self.edge_s)
+        self.edge_cs = self.edge_detection(self.edge_cs)
+
+        # erzhihua
+        a = torch.ones_like(self.c)
+        b = torch.zeros_like(self.c)
+
+        bin_c  = torch.where(self.edge_c >0.5, a, b)
+        bin_cs = torch.where(self.edge_cs>0.3, a, b)
+
+        self.loss_edge = torch.abs(self.edge_c-self.edge_cs).sum()
+
     def compute_losses(self):
         stylized_feats = self.encode_with_intermediate(self.cs)
         self.compute_content_loss(stylized_feats)
         self.compute_style_loss(stylized_feats)
+        self.edge_losses()
         self.loss_content = self.loss_content * self.opt.lambda_content
         self.loss_local = self.loss_local * self.opt.lambda_local
         self.loss_global = self.loss_global * self.opt.lambda_global
-        
+        self.loss_edge = self.loss_edge * self.opt.lambda_edge
     def optimize_parameters(self):
         self.seed = int(torch.randint(10000000, (1,))[0])
         self.forward()
         self.optimizer_g.zero_grad()
         self.compute_losses()
-        loss = self.loss_content + self.loss_global + self.loss_local
+        loss = self.loss_content + self.loss_global + self.loss_local + self.loss_edge
         loss.backward()
         self.optimizer_g.step()
+
 
