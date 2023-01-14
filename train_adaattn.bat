@@ -1,6 +1,6 @@
 python train.py ^
---content_path "D:\nick\Desktop\jupyter notebook\styleTransfer\data\coco2017\val2017" ^
---style_path "D:\nick\Desktop\jupyter notebook\styleTransfer\data\vangogh2photo\trainA" ^
+--content_path "D:\MyProject\Dataset\coco2017\train2017" ^
+--style_path "D:\MyProject\Dataset\vangogh2photo\trainA" ^
 --name AdaAttN_with_edge ^
 --model adaattn ^
 --dataset_mode unaligned ^
@@ -9,7 +9,7 @@ python train.py ^
 --crop_size 256 ^
 --image_encoder_path ./checkpoints/vgg_normalised.pth ^
 --gpu_ids 0 ^
---batch_size 1 ^
+--batch_size 4 ^
 --n_epochs 12 ^
 --n_epochs_decay 3 ^
 --display_freq 1 ^
@@ -18,6 +18,6 @@ python train.py ^
 --lambda_local 2 ^
 --lambda_global 10 ^
 --lambda_content 0 ^
---lambda_edge 0.002 ^
+--lambda_edge 100 ^
 --shallow_layer ^
 --skip_connection_3

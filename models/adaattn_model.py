@@ -252,7 +252,7 @@ class AdaAttNModel(BaseModel):
         bin_c  = torch.where(self.edge_c >0.5, a, b)
         bin_cs = torch.where(self.edge_cs>0.3, a, b)
 
-        self.loss_edge = torch.abs(self.edge_c-self.edge_cs).sum()
+        self.loss_edge = self.criterionMSE(self.edge_c, self.edge_cs)
 
     def compute_losses(self):
         stylized_feats = self.encode_with_intermediate(self.cs)
