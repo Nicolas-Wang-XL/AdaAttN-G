@@ -81,6 +81,7 @@ class AdaAttNModel(BaseModel):
             nn.Conv2d(512, 512, (3, 3)),
             nn.ReLU()  # relu5-4
         )
+        print(image_encoder)
         image_encoder.load_state_dict(torch.load(opt.image_encoder_path))
         enc_layers = list(image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:4]).to(opt.gpu_ids[0]), opt.gpu_ids)
@@ -263,6 +264,7 @@ class AdaAttNModel(BaseModel):
         self.loss_local = self.loss_local * self.opt.lambda_local
         self.loss_global = self.loss_global * self.opt.lambda_global
         self.loss_edge = self.loss_edge * self.opt.lambda_edge
+
     def optimize_parameters(self):
         self.seed = int(torch.randint(10000000, (1,))[0])
         self.forward()
