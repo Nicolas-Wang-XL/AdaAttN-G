@@ -5,4 +5,3 @@ options/__pycache__/*
 results/*
 util/__pycache__/*
 checkpoints/*
-train_adaattn.bat
