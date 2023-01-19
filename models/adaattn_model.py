@@ -3,8 +3,7 @@ import torch.nn as nn
 import itertools
 from .base_model import BaseModel
 from . import networks
-import numpy as np
-
+from d2l import torch as d2l
 
 class AdaAttNModel(BaseModel):
 
