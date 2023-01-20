@@ -1,0 +1,25 @@
+python train.py ^
+--content_path "D:\MyProject\Dataset\coco2017\train2017" ^
+--style_path "D:\MyProject\Dataset\wikiart" ^
+--name artvggAdaAttN_test ^
+--model artvggadaattn ^
+--dataset_mode unaligned ^
+--no_dropout ^
+--load_size 256 ^
+--crop_size 256 ^
+--style_encoder_path ./checkpoints/vgg_normalised.pth ^
+--gpu_ids 0 ^
+--batch_size 4 ^
+--n_epochs 12 ^
+--n_epochs_decay 3 ^
+--display_freq 1 ^
+--display_port 8097 ^
+--display_env ArtvggAdaAttN ^
+--lambda_local 3 ^
+--lambda_global 10 ^
+--lambda_content 0 ^
+--lambda_edge 0 ^
+--shallow_layer ^
+--skip_connection_3 ^
+--continue_train
+
