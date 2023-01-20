@@ -12,7 +12,7 @@ class ArtVGGModel(BaseModel):
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
         self.net = torchvision.models.vgg16(pretrained=True).to(self.device)
-        self.net.classifier._modules['6'] = nn.Linear(4096, 4).to(self.device)
+        self.net.classifier._modules['6'] = nn.Linear(4096, 27).to(self.device)
         # nn.Sequential(
         #     nn.Conv2d(3, 3, (1, 1)),
         #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
@@ -71,13 +71,14 @@ class ArtVGGModel(BaseModel):
         self.y = None
         self.y_hat = None
         self.loss_total = None
+        self.optimizers = []
         self.visual_names = ['x']
 
         if self.isTrain:
             self.loss_names = ['total']
             self.loss = nn.CrossEntropyLoss().to(self.device)
             self.optimizer_g = torch.optim.SGD(self.net.parameters(), lr=opt.lr)#torch.optim.Adam(itertools.chain(self.net.parameters()), lr=opt.lr)
-            # self.optimizers.append(self.optimizer_g)
+            self.optimizers.append(self.optimizer_g)
 
     def set_input(self, input_dict):
         self.x = input_dict['x'].to(self.device)
