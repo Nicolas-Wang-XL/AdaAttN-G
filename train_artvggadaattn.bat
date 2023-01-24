@@ -7,7 +7,7 @@ python train.py ^
 --no_dropout ^
 --load_size 256 ^
 --crop_size 256 ^
---style_encoder_path ./checkpoints/vgg_normalised.pth ^
+--style_encoder_path ./checkpoints/artvgg_test/latest_net_artvgg.pth ^
 --gpu_ids 0 ^
 --batch_size 4 ^
 --n_epochs 12 ^

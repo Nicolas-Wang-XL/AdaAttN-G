@@ -73,8 +73,10 @@ class artvggAdaAttNModel(BaseModel):
                 param.requires_grad = False
 
         # style image encoder
-        style_image_encoder = torchvision.models.vgg16(pretrained=True).features
+        style_image_encoder = torchvision.models.vgg16(pretrained=True)
+        style_image_encoder.classifier._modules['6'] = nn.Linear(4096, 27)
         style_image_encoder.load_state_dict(torch.load(opt.style_encoder_path))
+        style_image_encoder = style_image_encoder.features
         enc_layers = list(style_image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:4]).to(opt.gpu_ids[0]), opt.gpu_ids)
         enc_2 = nn.DataParallel(nn.Sequential(*enc_layers[4:9]).to(opt.gpu_ids[0]), opt.gpu_ids)

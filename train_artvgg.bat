@@ -13,5 +13,6 @@ python train_artvgg.py ^
 --n_epochs_decay 3 ^
 --display_freq 1 ^
 --display_port 8097 ^
---display_env ArtVGG
+--display_env ArtVGG ^
+--save_latest_freq 1000
 

@@ -163,7 +163,8 @@ class BaseModel(ABC):
                 net = getattr(self, 'net_' + name)
 
                 if len(self.gpu_ids) > 0 and torch.cuda.is_available():
-                    torch.save(net.module.cpu().state_dict(), save_path)
+                    print(save_filename)
+                    torch.save(net.cpu().state_dict(), save_path)
                     net.cuda(self.gpu_ids[0])
                 else:
                     torch.save(net.cpu().state_dict(), save_path)
@@ -205,7 +206,7 @@ class BaseModel(ABC):
                 load_path = os.path.join(self.save_dir, load_filename)
                 net = getattr(self, 'net_' + name)
                 if isinstance(net, torch.nn.DataParallel):
-                    net = net.module
+                    net = net#.module
                 print('loading the model from %s' % load_path)
                 # if you are using PyTorch newer than 0.4 (e.g., built from
                 # GitHub source), you can remove str() on self.device
