@@ -9,10 +9,15 @@ import torchvision
 
 
 class ArtVGGModel(BaseModel):
+    @staticmethod
+    def modify_commandline_options(parser, is_train=True):
+        parser.add_argument('--data_norm',action='store_true',
+                            help='img normazation to imagenet')
+        return parser
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
-        self.net_artvgg = torchvision.models.vgg16(pretrained=True).to(self.device)
-        self.net_artvgg.classifier._modules['6'] = nn.Linear(4096, 27).to(self.device)
+        self.net_artvgg = torchvision.models.vgg19(pretrained=True).to(self.device)
+        self.net_artvgg.classifier._modules['6'] = nn.Linear(4096, 24).to(self.device)
         # nn.Sequential(
         #     nn.Conv2d(3, 3, (1, 1)),
         #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),

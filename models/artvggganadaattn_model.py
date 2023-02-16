@@ -24,6 +24,12 @@ class artvggAdaAttNModel(BaseModel):
                                 help='weight for attention weighted style loss')
             parser.add_argument('--lambda_edge', type=float, default=0.002,
                                 help='weight for content edge loss')
+            parser.add_argument('--lambda_c', type=float, default=50,
+                                help='weight for content edge loss')
+            parser.add_argument('--lambda_s', type=float, default=50,
+                                help='weight for content edge loss')
+            parser.add_argument('--lambda_d', type=float, default=50,
+                                help='weight for content edge loss')
         return parser
 
     def __init__(self, opt):
@@ -96,7 +102,7 @@ class artvggAdaAttNModel(BaseModel):
                 param.requires_grad = False
 
         self.visual_names = ['c', 'cs', 's', 'c_org', 'cs_org', 's_org']#, 'edge_c', 'edge_cs', 'edge_s']
-        self.model_names = ['decoder', 'transformer']
+        self.model_names = ['decoder', 'transformer', 'SD', 'CD']
         parameters = []
         self.max_sample = 64 * 64
         if opt.skip_connection_3:
@@ -113,18 +119,18 @@ class artvggAdaAttNModel(BaseModel):
             in_planes=512, key_planes=channels, shallow_layer=opt.shallow_layer)
         decoder = networks.Decoder(opt.skip_connection_3)
 
-        # SD = torchvision.models.resnet18(pretrained=True)
-        # SD.fc = nn.Linear(512, 1)
-        # SD.sigmoid = nn.Sigmoid()
-        #
-        # CD = torchvision.models.resnet18(pretrained=True)
-        # CD.fc = nn.Linear(512, 1)
-        # CD.sigmoid = nn.Sigmoid()
+        SD = torchvision.models.resnet18(pretrained=True)
+        SD.fc = nn.Linear(512, 1)
+        SD.sigmoid = nn.Sigmoid()
+
+        CD = torchvision.models.resnet18(pretrained=True)
+        CD.fc = nn.Linear(512, 1)
+        CD.sigmoid = nn.Sigmoid()
 
         self.net_decoder = networks.init_net(decoder, opt.init_type, opt.init_gain, opt.gpu_ids)
         self.net_transformer = networks.init_net(transformer, opt.init_type, opt.init_gain, opt.gpu_ids)
-        # self.net_SD = networks.init_net(SD, opt.init_type, opt.init_gain, opt.gpu_ids)
-        # self.net_CD = networks.init_net(CD, opt.init_type, opt.init_gain, opt.gpu_ids)
+        self.net_SD = networks.init_net(SD, opt.init_type, opt.init_gain, opt.gpu_ids)
+        self.net_CD = networks.init_net(CD, opt.init_type, opt.init_gain, opt.gpu_ids)
 
         parameters.append(self.net_decoder.parameters())
         parameters.append(self.net_transformer.parameters())
@@ -143,21 +149,21 @@ class artvggAdaAttNModel(BaseModel):
         self.c_feats = None
         self.seed = 6666
         if self.isTrain:
-            self.loss_names = ['content', 'global', 'local']#, 'edge']
+            self.loss_names = ['content', 'global', 'local', 'SD', 'CD', 'D', 'G']#, 'edge']
             self.criterionMSE = torch.nn.MSELoss().to(self.device)
             # define loss functions
-            # self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
+            self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.optimizer_g = torch.optim.Adam(itertools.chain(*parameters), lr=opt.lr)
-            # self.optimizer_D = torch.optim.Adam(itertools.chain(self.net_SD.parameters(), self.net_CD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
+            self.optimizer_D = torch.optim.Adam(itertools.chain(self.net_SD.parameters(), self.net_CD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_g)
             self.loss_global = torch.tensor(0., device=self.device)
             self.loss_local = torch.tensor(0., device=self.device)
             self.loss_content = torch.tensor(0., device=self.device)
             self.loss_edge = torch.tensor(0., device=self.device)
-            # self.loss_SD = torch.tensor(0., device=self.device)
-            # self.loss_CD = torch.tensor(0., device=self.device)
-            # self.loss_D = torch.tensor(0., device=self.device)
-            # self.loss_G = torch.tensor(0., device=self.device)
+            self.loss_SD = torch.tensor(0., device=self.device)
+            self.loss_CD = torch.tensor(0., device=self.device)
+            self.loss_D = torch.tensor(0., device=self.device)
+            self.loss_G = torch.tensor(0., device=self.device)
 
             self.conv_op_x = nn.Conv2d(1, 1, kernel_size=3, padding=1, bias=False, device=self.device).requires_grad_(False)
             self.conv_op_y = nn.Conv2d(1, 1, kernel_size=3, padding=1, bias=False, device=self.device).requires_grad_(False)
@@ -296,16 +302,67 @@ class artvggAdaAttNModel(BaseModel):
         self.loss_edge = self.criterionMSE(self.edge_c, self.edge_cs)
 
 
+
+    def backward_D_basic(self, netD, real, fake):
+        """Calculate GAN loss for the discriminator
+
+        Parameters:
+            netD (network)      -- the discriminator D
+            real (tensor array) -- real images
+            fake (tensor array) -- images generated by a generator
+
+        Return the discriminator loss.
+        We also call loss_D.backward() to calculate the gradients.
+        """
+        # Real
+        pred_real = netD(real)
+        loss_D_real = self.criterionGAN(pred_real, True)
+        # Fake
+        pred_fake = netD(fake.detach())
+        loss_D_fake = self.criterionGAN(pred_fake, False)
+        # Combined loss and calculate gradients
+        self.loss_D = (loss_D_real + loss_D_fake) * 0.5 * self.opt.lambda_d
+        self.loss_D.backward()
+        return self.loss_D
+
+    def backward_D(self):
+        """Calculate the loss for generators G_A and G_B"""
+        # train SD
+        self.backward_D_basic(self.net_SD, self.s, self.cs)
+        # train CD
+        # self.backward_D_basic(self.net_CD, self.c, self.cs)
+
+    def backward_G(self):
+        """Calculate the loss for generators G_A and G_B"""
+        lambda_s = self.opt.lambda_s
+        lambda_c = self.opt.lambda_c
+
+        # GAN loss SD(G(A))
+        self.loss_SD = self.criterionGAN(self.net_SD(self.cs), True)
+        # GAN loss CD(G(A))
+        # self.loss_CD = self.criterionGAN(self.net_CD(self.cs), True)
+        # combined loss and calculate gradients
+        self.loss_G = self.loss_SD*lambda_s# + self.loss_CD*lambda_c
+        # self.loss_G.backward()
+
     def optimize_G(self):
         # forward
         # G_A and G_B
-        # self.set_requires_grad([self.net_SD, self.net_CD], False)  # Ds require no gradients when optimizing Gs
+        self.set_requires_grad([self.net_SD, self.net_CD], False)  # Ds require no gradients when optimizing Gs
         self.optimizer_g.zero_grad()  # set G_A and G_B's gradients to zero
+        self.backward_G()  # calculate gradients for G_A and G_B
         self.compute_losses()
-        loss = self.loss_content + self.loss_global + self.loss_local# + self.loss_edge
+        loss = self.loss_content + self.loss_global + self.loss_local + self.loss_G# + self.loss_edge
         loss.backward()
         self.optimizer_g.step()
 
+    def optimize_D(self):
+        # forward
+        # D_A and D_B
+        self.set_requires_grad([self.net_SD, self.net_CD], True)
+        self.optimizer_D.zero_grad()  # set D_A and D_B's gradients to zero
+        self.backward_D()  # calculate gradients for D_A
+        self.optimizer_D.step()  # update D_A and D_B's weights
 
     def compute_losses(self):
         content_stylized_feats = self.encode_with_intermediate(self.cs, 'c')
@@ -322,5 +379,7 @@ class artvggAdaAttNModel(BaseModel):
         self.seed = int(torch.randint(10000000, (1,))[0])
         self.forward()
         self.optimize_G()
+        # self.optimizer_g.zero_grad()
+        self.optimize_D()
 
 

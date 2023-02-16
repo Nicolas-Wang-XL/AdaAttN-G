@@ -19,6 +19,9 @@ python train.py ^
 --lambda_global 10 ^
 --lambda_content 0 ^
 --lambda_edge 0 ^
+--lambda_c 0 ^
+--lambda_s 0 ^
+--lambda_d 0 ^
 --shallow_layer ^
 --skip_connection_3 ^
 --data_norm

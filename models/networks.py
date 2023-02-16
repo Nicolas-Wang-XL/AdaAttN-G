@@ -85,7 +85,7 @@ def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=()):
     if len(gpu_ids) > 0:
         assert (torch.cuda.is_available())
         net.to(gpu_ids[0])
-        net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs
+        # net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs
     init_weights(net, init_type, init_gain=init_gain)
     return net
 
@@ -213,3 +213,204 @@ class Decoder(nn.Module):
             cs = self.decoder_layer_2(torch.cat((cs, c_adain_3_feat), dim=1))
         return cs
 
+class GANLoss(nn.Module):
+    """Define different GAN objectives.
+
+    The GANLoss class abstracts away the need to create the target label tensor
+    that has the same size as the input.
+    """
+
+    def __init__(self, gan_mode, target_real_label=1.0, target_fake_label=0.0):
+        """ Initialize the GANLoss class.
+
+        Parameters:
+            gan_mode (str) - - the type of GAN objective. It currently supports vanilla, lsgan, and wgangp.
+            target_real_label (bool) - - label for a real image
+            target_fake_label (bool) - - label of a fake image
+
+        Note: Do not use sigmoid as the last layer of Discriminator.
+        LSGAN needs no sigmoid. vanilla GANs will handle it with BCEWithLogitsLoss.
+        """
+        super(GANLoss, self).__init__()
+        self.register_buffer('real_label', torch.tensor(target_real_label))
+        self.register_buffer('fake_label', torch.tensor(target_fake_label))
+        self.gan_mode = gan_mode
+        if gan_mode == 'lsgan':
+            self.loss = nn.MSELoss()
+        elif gan_mode == 'vanilla':
+            self.loss = nn.BCEWithLogitsLoss()
+        elif gan_mode in ['wgangp']:
+            self.loss = None
+        else:
+            raise NotImplementedError('gan mode %s not implemented' % gan_mode)
+
+    def get_target_tensor(self, prediction, target_is_real):
+        """Create label tensors with the same size as the input.
+
+        Parameters:
+            prediction (tensor) - - tpyically the prediction from a discriminator
+            target_is_real (bool) - - if the ground truth label is for real images or fake images
+
+        Returns:
+            A label tensor filled with ground truth label, and with the size of the input
+        """
+
+        if target_is_real:
+            target_tensor = self.real_label
+        else:
+            target_tensor = self.fake_label
+        return target_tensor.expand_as(prediction)
+
+    def __call__(self, prediction, target_is_real):
+        """Calculate loss given Discriminator's output and grount truth labels.
+
+        Parameters:
+            prediction (tensor) - - tpyically the prediction output from a discriminator
+            target_is_real (bool) - - if the ground truth label is for real images or fake images
+
+        Returns:
+            the calculated loss.
+        """
+        if self.gan_mode in ['lsgan', 'vanilla']:
+            target_tensor = self.get_target_tensor(prediction, target_is_real)
+            loss = self.loss(prediction, target_tensor)
+        elif self.gan_mode == 'wgangp':
+            if target_is_real:
+                loss = -prediction.mean()
+            else:
+                loss = prediction.mean()
+        return loss
+
+
+class SelfAdaAttN(nn.Module):
+
+    def __init__(self, in_planes, max_sample=256 * 256, key_planes=None):
+        super(SelfAdaAttN, self).__init__()
+        if key_planes is None:
+            key_planes = in_planes
+        self.f = nn.Conv2d(key_planes, key_planes, (1, 1))
+        self.g = nn.Conv2d(key_planes, key_planes, (1, 1))
+        # self.h = nn.Conv2d(in_planes, in_planes, (1, 1))
+        self.sm = nn.Softmax(dim=-1)
+        self.max_sample = max_sample
+
+    def forward(self, content, style, seed=None):
+        Q = self.f(content)
+        K = self.g(style)
+        # H = self.h(style)
+        b, _, h_g, w_g = K.size()
+        K = K.view(b, -1, w_g * h_g).contiguous()
+        if w_g * h_g > self.max_sample:
+            if seed is not None:
+                torch.manual_seed(seed)
+            index = torch.randperm(w_g * h_g).to(content.device)[:self.max_sample]
+            K = K[:, :, index]
+            style_flat = K.view(b, -1, w_g * h_g)[:, :, index].transpose(1, 2).contiguous()
+        else:
+            style_flat = K.view(b, -1, w_g * h_g).transpose(1, 2).contiguous()
+        b, _, h, w = Q.size()
+        Q = Q.view(b, -1, w * h).permute(0, 2, 1)
+        S = torch.bmm(Q, K)
+        # S: b, n_c, n_s
+        S = self.sm(S)
+        # mean: b, n_c, c
+        mean = torch.bmm(S, style_flat)
+        # std: b, n_c, c
+        std = torch.sqrt(torch.relu(torch.bmm(S, style_flat ** 2) - mean ** 2))
+        # mean, std: b, c, h, w
+        mean = mean.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
+        std = std.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()
+        return std * mean_variance_norm(content) + mean
+
+class AdaIn(nn.Module):
+
+    def __init__(self):
+        super(AdaIn, self).__init__()
+        # if key_planes is None:
+        #     key_planes = in_planes
+        # self.f = nn.Conv2d(key_planes, key_planes, (1, 1))
+        # self.g = nn.Conv2d(key_planes, key_planes, (1, 1))
+        # self.max_sample = max_sample
+
+    def forward(self, content, style, seed=None):
+        # G = self.g(style)
+        s_mean, s_std = calc_mean_std(style)
+
+        return s_std.expand(content.shape) * mean_variance_norm(content) + s_mean.expand(content.shape)
+
+
+class SynBlock(nn.Module):
+
+    def __init__(self, in_channels, out_channels, use_adain = False, use_us = True):
+        super(SynBlock, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        if use_us:
+            self.us_block = nn.Sequential(
+                nn.Upsample(scale_factor=2, mode='bicubic', align_corners=True),
+                nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), padding_mode='reflect'),
+                nn.LeakyReLU(),
+                nn.Conv2d(out_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), padding_mode='reflect'),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.us_block = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), padding_mode='reflect'),
+                nn.LeakyReLU(),
+                nn.Conv2d(out_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), padding_mode='reflect'),
+                nn.LeakyReLU(),
+            )
+
+
+        if not use_adain:
+            self.syn_layer = SelfAdaAttN(in_planes=in_channels)
+        else:
+            self.syn_layer = AdaIn()
+
+
+    def forward(self, x, feature_c, feature_s, seed=None):
+        cs = self.syn_layer(feature_c, feature_s, seed=seed)
+        x = cs + x
+        return self.us_block(x)
+
+
+class SynDecoder(nn.Module):
+
+    def __init__(self, channels):
+        super(SynDecoder, self).__init__()
+
+        for i in range(len(channels)-1):
+            # if(i>0 and i<3):
+            #     block = SynBlock(channels[i], channels[i+1])
+            # el
+            if(i == len(channels)-2):
+                block = SynBlock(channels[i], channels[i+1], use_adain=True, use_us=False)
+            else:
+                block = SynBlock(channels[i], channels[i+1], use_adain=True)
+
+            setattr(self, f'b{i}', block)
+
+        self.f = nn.Conv2d(channels[-1], channels[-1], (1, 1))
+
+    def forward(self, features_c, features_s, seed=None):
+        blk_len = len(features_c)
+        x = torch.zeros_like(features_c[blk_len - 1]).to(features_c[0].device)
+        # print(blk_len)
+        for i in range(blk_len):
+            # print(i)
+            # print(features_c[blk_len-i-1].shape)
+            block = getattr(self, f'b{i}')
+            x = block(x, features_c[blk_len-i-1], features_s[blk_len-i-1], seed)
+            # print(x.shape)
+
+        return self.f(x)
+
+
+class SynImage(nn.Module):
+    def __init__(self, image_shape):
+        super(SynImage, self).__init__()
+        self.weight = nn.Parameter(torch.rand(*image_shape))
+
+    def forward(self, c_shape):
+        return self.weight.expand(c_shape)

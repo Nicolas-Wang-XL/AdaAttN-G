@@ -14,6 +14,8 @@ class AdaAttNModel(BaseModel):
                             help='if specified, add skip connection on ReLU-3')
         parser.add_argument('--shallow_layer', action='store_true',
                             help='if specified, also use features of shallow layers')
+        parser.add_argument('--data_norm',action='store_true',
+                            help='img normazation to imagenet')
         if is_train:
             parser.add_argument('--lambda_content', type=float, default=0., help='weight for L2 content loss')
             parser.add_argument('--lambda_global', type=float, default=10., help='weight for L2 style loss')
@@ -26,6 +28,7 @@ class AdaAttNModel(BaseModel):
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
         image_encoder = nn.Sequential(
+
             nn.Conv2d(3, 3, (1, 1)),
             nn.ReflectionPad2d((1, 1, 1, 1)),
             nn.Conv2d(3, 64, (3, 3)),
@@ -92,7 +95,7 @@ class AdaAttNModel(BaseModel):
         for layer in self.image_encoder_layers:
             for param in layer.parameters():
                 param.requires_grad = False
-        self.visual_names = ['c', 'cs', 's', 'edge_c', 'edge_cs', 'edge_s']
+        self.visual_names = ['c', 'cs', 's']
         self.model_names = ['decoder', 'transformer']
         parameters = []
         self.max_sample = 64 * 64

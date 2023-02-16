@@ -1,20 +1,20 @@
 python train.py ^
 --content_path "D:\MyProject\Dataset\coco2017\train2017" ^
 --style_path "D:\MyProject\Dataset\wikiart" ^
---name artvggAdaAttN_all_vgg19_2200_24class_relu1_with_normvgg_c_s_ ^
---model artvggadaattn ^
+--name artvggSelfAdaAttN_without_artvgg_15_adain ^
+--model artvggselfadaattn ^
 --dataset_mode unaligned ^
 --no_dropout ^
 --load_size 256 ^
 --crop_size 256 ^
 --style_encoder_path ./checkpoints\artvgg19_2200_24class_with_norm/latest_net_artvgg.pth ^
 --gpu_ids 0 ^
---batch_size 4 ^
+--batch_size 1 ^
 --n_epochs 2 ^
 --n_epochs_decay 3 ^
---display_freq 100 ^
+--display_freq 400 ^
 --display_port 8097 ^
---display_env ArtvggAdaAttN ^
+--display_env ArtvggSelfAdaAttN ^
 --lambda_local 3 ^
 --lambda_global 10 ^
 --lambda_content 0 ^

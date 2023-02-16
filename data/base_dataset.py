@@ -5,6 +5,7 @@ It also includes common transformation functions (e.g., get_transform, __scale_w
 import random
 import os
 import numpy as np
+import torch
 import torch.utils.data as data
 from PIL import Image
 import torchvision.transforms as transforms
@@ -73,7 +74,10 @@ def get_params(opt, size):
     return {'crop_pos': (x, y), 'flip': flip}
 
 
-def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC):
+rgb_mean = torch.tensor([0.485, 0.456, 0.406])
+rgb_std = torch.tensor([0.229, 0.224, 0.225])
+
+def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, style_data=False):
     transform_list = []
     if grayscale:
         transform_list.append(transforms.Grayscale(1))
@@ -99,6 +103,11 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC):
             transform_list.append(transforms.Lambda(lambda img: __flip(img, params['flip'])))
 
     transform_list += [transforms.ToTensor()]
+
+    if opt.data_norm and (not style_data):
+        print(">>>>>>>>>> norm true")
+        transform_list += [transforms.Normalize(mean=rgb_mean, std=rgb_std)]
+
     return transforms.Compose(transform_list)
 
 

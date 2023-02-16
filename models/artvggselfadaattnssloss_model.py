@@ -6,7 +6,7 @@ from . import networks
 from d2l import torch as d2l
 import torchvision
 
-class artvggAdaAttNModel(BaseModel):
+class artvggSelfAdaAttNSSlossModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -18,9 +18,11 @@ class artvggAdaAttNModel(BaseModel):
         parser.add_argument('--data_norm',action='store_true',
                             help='img normazation to imagenet')
         if is_train:
-            parser.add_argument('--lambda_content', type=float, default=0., help='weight for L2 content loss')
-            parser.add_argument('--lambda_global', type=float, default=10., help='weight for L2 style loss')
-            parser.add_argument('--lambda_local', type=float, default=3.,
+            parser.add_argument('--lambda_content', type=float, default=10., help='weight for L2 content loss')
+            parser.add_argument('--lambda_style', type=float, default=7., help='weight for L2 style loss')
+            parser.add_argument('--lambda_id1', type=float, default=50.,
+                                help='weight for attention weighted style loss')
+            parser.add_argument('--lambda_id2', type=float, default=1.,
                                 help='weight for attention weighted style loss')
             parser.add_argument('--lambda_edge', type=float, default=0.002,
                                 help='weight for content edge loss')
@@ -61,7 +63,7 @@ class artvggAdaAttNModel(BaseModel):
         # (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
         # content_image encoder
         content_image_encoder = torchvision.models.vgg19(pretrained=True).features
-        print(content_image_encoder)
+        # print(content_image_encoder)
         # content_image_encoder.load_state_dict(torch.load(opt.image_encoder_path))
         enc_layers = list(content_image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:2]).to(opt.gpu_ids[0]), opt.gpu_ids)
@@ -81,8 +83,8 @@ class artvggAdaAttNModel(BaseModel):
 
         # style image encoder
         style_image_encoder = torchvision.models.vgg19(pretrained=True)
-        style_image_encoder.classifier._modules['6'] = nn.Linear(4096, 24)
-        style_image_encoder.load_state_dict(torch.load(opt.style_encoder_path))
+        # style_image_encoder.classifier._modules['6'] = nn.Linear(4096, 24)
+        # style_image_encoder.load_state_dict(torch.load(opt.style_encoder_path))
         style_image_encoder = style_image_encoder.features
         enc_layers = list(style_image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:2]).to(opt.gpu_ids[0]), opt.gpu_ids)
@@ -95,23 +97,23 @@ class artvggAdaAttNModel(BaseModel):
             for param in layer.parameters():
                 param.requires_grad = False
 
-        self.visual_names = ['c', 'cs', 's', 'c_org', 'cs_org', 's_org']#, 'edge_c', 'edge_cs', 'edge_s']
-        self.model_names = ['decoder', 'transformer']
+        self.visual_names = ['c', 'cs', 's', 'c_org', 'cs_org', 's_org']#, 'cc', 'ss']#, 'edge_c', 'edge_cs', 'edge_s']
+        self.model_names = ['decoder']
         parameters = []
         self.max_sample = 64 * 64
-        if opt.skip_connection_3:
-            adaattn_3 = networks.AdaAttN(in_planes=256, key_planes=256 + 128 + 64 if opt.shallow_layer else 256,
-                                              max_sample=self.max_sample)
-            self.net_adaattn_3 = networks.init_net(adaattn_3, opt.init_type, opt.init_gain, opt.gpu_ids)
-            self.model_names.append('adaattn_3')
-            parameters.append(self.net_adaattn_3.parameters())
-        if opt.shallow_layer:
-            channels = 512 + 256 + 128 + 64
-        else:
-            channels = 512
-        transformer = networks.Transformer(
-            in_planes=512, key_planes=channels, shallow_layer=opt.shallow_layer)
-        decoder = networks.Decoder(opt.skip_connection_3)
+        # if opt.skip_connection_3:
+        #     adaattn_3 = networks.AdaAttN(in_planes=256, key_planes=256 + 128 + 64 if opt.shallow_layer else 256,
+        #                                       max_sample=self.max_sample)
+        #     self.net_adaattn_3 = networks.init_net(adaattn_3, opt.init_type, opt.init_gain, opt.gpu_ids)
+        #     self.model_names.append('adaattn_3')
+        #     parameters.append(self.net_adaattn_3.parameters())
+        # if opt.shallow_layer:
+        #     channels = 512 + 256 + 128 + 64
+        # else:
+        #     channels = 512
+        # transformer = networks.Transformer(
+        #     in_planes=512, key_planes=channels, shallow_layer=opt.shallow_layer)
+        decoder = networks.SynDecoder([512, 512, 256, 128, 64, 3])
 
         # SD = torchvision.models.resnet18(pretrained=True)
         # SD.fc = nn.Linear(512, 1)
@@ -122,15 +124,19 @@ class artvggAdaAttNModel(BaseModel):
         # CD.sigmoid = nn.Sigmoid()
 
         self.net_decoder = networks.init_net(decoder, opt.init_type, opt.init_gain, opt.gpu_ids)
-        self.net_transformer = networks.init_net(transformer, opt.init_type, opt.init_gain, opt.gpu_ids)
+        # print(">>>>>>>>>>>>>>  ", *self.net_decoder.parameters())
+        # print(">>>>>>>>>>>>>>  ", *self.net_decoder.syn_blks[0].parameters())
+        # self.net_transformer = networks.init_net(transformer, opt.init_type, opt.init_gain, opt.gpu_ids)
         # self.net_SD = networks.init_net(SD, opt.init_type, opt.init_gain, opt.gpu_ids)
         # self.net_CD = networks.init_net(CD, opt.init_type, opt.init_gain, opt.gpu_ids)
 
         parameters.append(self.net_decoder.parameters())
-        parameters.append(self.net_transformer.parameters())
+        # parameters.append(self.net_transformer.parameters())
         self.c = None
         self.cs = None
         self.s = None
+        self.cc = None
+        self.ss = None
         self.rgb_mean = torch.tensor([0.485, 0.456, 0.406]).to(self.device)
         self.rgb_std = torch.tensor([0.229, 0.224, 0.225]).to(self.device)
         self.c_org = None
@@ -143,17 +149,17 @@ class artvggAdaAttNModel(BaseModel):
         self.c_feats = None
         self.seed = 6666
         if self.isTrain:
-            self.loss_names = ['content', 'global', 'local']#, 'edge']
+            self.loss_names = ['content', 'style']#, 'id1', 'id2']#, 'edge']
             self.criterionMSE = torch.nn.MSELoss().to(self.device)
             # define loss functions
             # self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.optimizer_g = torch.optim.Adam(itertools.chain(*parameters), lr=opt.lr)
             # self.optimizer_D = torch.optim.Adam(itertools.chain(self.net_SD.parameters(), self.net_CD.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_g)
-            self.loss_global = torch.tensor(0., device=self.device)
-            self.loss_local = torch.tensor(0., device=self.device)
+            self.loss_style = torch.tensor(0., device=self.device)
             self.loss_content = torch.tensor(0., device=self.device)
-            self.loss_edge = torch.tensor(0., device=self.device)
+            self.loss_id1 = torch.tensor(0., device=self.device)
+            self.loss_id2 = torch.tensor(0., device=self.device)
             # self.loss_SD = torch.tensor(0., device=self.device)
             # self.loss_CD = torch.tensor(0., device=self.device)
             # self.loss_D = torch.tensor(0., device=self.device)
@@ -205,64 +211,61 @@ class artvggAdaAttNModel(BaseModel):
     def forward(self):
         self.c_feats = self.encode_with_intermediate(self.c, 'c')
         self.s_feats = self.encode_with_intermediate(self.s, 's')
-        if self.opt.skip_connection_3:
-            c_adain_feat_3 = self.net_adaattn_3(self.c_feats[2], self.s_feats[2], self.get_key(self.c_feats, 2, self.opt.shallow_layer),
-                                                   self.get_key(self.s_feats, 2, self.opt.shallow_layer), self.seed)
-        else:
-            c_adain_feat_3 = None
-        cs = self.net_transformer(self.c_feats[3], self.s_feats[3], self.c_feats[4], self.s_feats[4],
-                                  self.get_key(self.c_feats, 3, self.opt.shallow_layer),
-                                  self.get_key(self.s_feats, 3, self.opt.shallow_layer),
-                                  self.get_key(self.c_feats, 4, self.opt.shallow_layer),
-                                  self.get_key(self.s_feats, 4, self.opt.shallow_layer), self.seed)
-        self.cs = self.net_decoder(cs, c_adain_feat_3)
+        # if self.opt.skip_connection_3:
+        #     c_adain_feat_3 = self.net_adaattn_3(self.c_feats[2], self.s_feats[2], self.get_key(self.c_feats, 2, self.opt.shallow_layer),
+        #                                            self.get_key(self.s_feats, 2, self.opt.shallow_layer), self.seed)
+        # else:
+        #     c_adain_feat_3 = None
+        # cs = self.net_transformer(self.c_feats[3], self.s_feats[3], self.c_feats[4], self.s_feats[4],
+        #                           self.get_key(self.c_feats, 3, self.opt.shallow_layer),
+        #                           self.get_key(self.s_feats, 3, self.opt.shallow_layer),
+        #                           self.get_key(self.c_feats, 4, self.opt.shallow_layer),
+        #                           self.get_key(self.s_feats, 4, self.opt.shallow_layer), self.seed)
+        self.cs = self.net_decoder(self.c_feats, self.s_feats, self.seed)
+        # self.cc = self.net_decoder(self.c_feats, self.c_feats, self.seed)
+        # self.ss = self.net_decoder(self.s_feats, self.s_feats, self.seed)
         self.c_org = self.postprocess(self.c)
         self.cs_org= self.postprocess(self.cs)
         self.s_org = self.postprocess(self.s)
+
+    def adain_fusion(self, content, style):
+        # G = self.g(style)
+        s_mean, s_std = networks.calc_mean_std(style)
+
+        return s_std.expand(content.shape) * networks.mean_variance_norm(content) + s_mean.expand(content.shape)
 
     def compute_content_loss(self, stylized_feats):
         self.loss_content = torch.tensor(0., device=self.device)
         if self.opt.lambda_content > 0:
             for i in range(1, 5):
-                self.loss_content += self.criterionMSE(networks.mean_variance_norm(stylized_feats[i]),
-                                                       networks.mean_variance_norm(self.c_feats[i]))
+                self.loss_content += self.criterionMSE(stylized_feats[i],
+                                                       # self.c_feats[i])
+                                                       self.adain_fusion(self.c_feats[i], self.s_feats[i]))
+            self.loss_content = self.loss_content / 4
 
     def compute_style_loss(self, stylized_feats):
-        self.loss_global = torch.tensor(0., device=self.device)
-        if self.opt.lambda_global > 0:
+        self.loss_style = torch.tensor(0., device=self.device)
+        if self.opt.lambda_style > 0:
             for i in range(1, 5):
                 s_feats_mean, s_feats_std = networks.calc_mean_std(self.s_feats[i])
                 stylized_feats_mean, stylized_feats_std = networks.calc_mean_std(stylized_feats[i])
-                self.loss_global += self.criterionMSE(
+                self.loss_style += self.criterionMSE(
                     stylized_feats_mean, s_feats_mean) + self.criterionMSE(stylized_feats_std, s_feats_std)
-        self.loss_local = torch.tensor(0., device=self.device)
-        if self.opt.lambda_local > 0:
+            self.loss_style = self.loss_style / 4
+
+    def compute_id_loss(self, ss_feats, cc_feats):
+        self.loss_id1 = torch.tensor(0., device=self.device)
+        if self.opt.lambda_id1 > 0:
+            self.loss_id1 += self.criterionMSE(
+                self.cc, self.c) + self.criterionMSE(self.ss, self.s)
+
+
+        self.loss_id2 = torch.tensor(0., device=self.device)
+        if self.opt.lambda_id2 > 0:
             for i in range(1, 5):
-                c_key = self.get_key(self.c_feats, i, self.opt.shallow_layer)
-                s_key = self.get_key(self.s_feats, i, self.opt.shallow_layer)
-                s_value = self.s_feats[i]
-                b, _, h_s, w_s = s_key.size()
-                s_key = s_key.view(b, -1, h_s * w_s).contiguous()
-                if h_s * w_s > self.max_sample:
-                    torch.manual_seed(self.seed)
-                    index = torch.randperm(h_s * w_s).to(self.device)[:self.max_sample]
-                    s_key = s_key[:, :, index]
-                    style_flat = s_value.view(b, -1, h_s * w_s)[:, :, index].transpose(1, 2).contiguous()
-                else:
-                    style_flat = s_value.view(b, -1, h_s * w_s).transpose(1, 2).contiguous()
-                b, _, h_c, w_c = c_key.size()
-                c_key = c_key.view(b, -1, h_c * w_c).permute(0, 2, 1).contiguous()
-                attn = torch.bmm(c_key, s_key)
-                # S: b, n_c, n_s
-                attn = torch.softmax(attn, dim=-1)
-                # mean: b, n_c, c
-                mean = torch.bmm(attn, style_flat)
-                # std: b, n_c, c
-                std = torch.sqrt(torch.relu(torch.bmm(attn, style_flat ** 2) - mean ** 2))
-                # mean, std: b, c, h, w
-                mean = mean.view(b, h_c, w_c, -1).permute(0, 3, 1, 2).contiguous()
-                std = std.view(b, h_c, w_c, -1).permute(0, 3, 1, 2).contiguous()
-                self.loss_local += self.criterionMSE(stylized_feats[i], std * networks.mean_variance_norm(self.c_feats[i]) + mean)
+                self.loss_id2 += self.criterionMSE(
+                    ss_feats[i], self.s_feats[i]) + self.criterionMSE(cc_feats[i], self.c_feats[i])
+            self.loss_id2 = self.loss_id2 / 4
 
     def rgb2gray(self, rgb_img):
 
@@ -302,7 +305,7 @@ class artvggAdaAttNModel(BaseModel):
         # self.set_requires_grad([self.net_SD, self.net_CD], False)  # Ds require no gradients when optimizing Gs
         self.optimizer_g.zero_grad()  # set G_A and G_B's gradients to zero
         self.compute_losses()
-        loss = self.loss_content + self.loss_global + self.loss_local# + self.loss_edge
+        loss = self.loss_content + self.loss_style + self.loss_id1 + self.loss_id2# + self.loss_edge
         loss.backward()
         self.optimizer_g.step()
 
@@ -310,12 +313,16 @@ class artvggAdaAttNModel(BaseModel):
     def compute_losses(self):
         content_stylized_feats = self.encode_with_intermediate(self.cs, 'c')
         style_stylized_feats = self.encode_with_intermediate(self.cs, 's')
+        # cc_stylized_feats = self.encode_with_intermediate(self.cc, 'c')
+        # ss_stylized_feats = self.encode_with_intermediate(self.ss, 's')
         self.compute_content_loss(content_stylized_feats)
         self.compute_style_loss(style_stylized_feats)
+        # self.compute_id_loss(ss_stylized_feats, cc_stylized_feats)
         # self.edge_losses()
         self.loss_content = self.loss_content * self.opt.lambda_content
-        self.loss_local = self.loss_local * self.opt.lambda_local
-        self.loss_global = self.loss_global * self.opt.lambda_global
+        self.loss_style = self.loss_style * self.opt.lambda_style
+        # self.loss_id1 = self.loss_id1 * self.opt.lambda_id1
+        # self.loss_id2 = self.loss_id2 * self.opt.lambda_id2
         # self.loss_edge = self.loss_edge * self.opt.lambda_edge
 
     def optimize_parameters(self):

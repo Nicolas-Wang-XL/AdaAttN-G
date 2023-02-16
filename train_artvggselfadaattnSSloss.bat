@@ -1,8 +1,8 @@
 python train.py ^
 --content_path "D:\MyProject\Dataset\coco2017\train2017" ^
 --style_path "D:\MyProject\Dataset\wikiart" ^
---name artvggAdaAttN_all_vgg19_2200_24class_relu1_with_normvgg_c_s_ ^
---model artvggadaattn ^
+--name artvggselfadaattnssloss_bicubic_adainloss2_allin ^
+--model artvggselfadaattnssloss ^
 --dataset_mode unaligned ^
 --no_dropout ^
 --load_size 256 ^
@@ -14,12 +14,14 @@ python train.py ^
 --n_epochs_decay 3 ^
 --display_freq 100 ^
 --display_port 8097 ^
---display_env ArtvggAdaAttN ^
---lambda_local 3 ^
---lambda_global 10 ^
---lambda_content 0 ^
---lambda_edge 0 ^
+--display_env ArtvggSelfAdaAttN ^
+--lambda_content 1 ^
+--lambda_style 1 ^
+--lambda_id1 50 ^
+--lambda_id2 1 ^
+--lr 0.0005 ^
 --shallow_layer ^
 --skip_connection_3 ^
+--save_latest_freq 2000 ^
 --data_norm
 

@@ -1,7 +1,7 @@
 python test.py ^
 --content_path datasets/contents ^
 --style_path datasets/styles ^
---name AdaAttN --model adaattn ^
+--name AdaAttN_without_edge --model adaattn ^
 --dataset_mode unaligned ^
 --load_size 512 ^
 --crop_size 512 ^

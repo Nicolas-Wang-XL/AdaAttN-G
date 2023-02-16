@@ -6,7 +6,7 @@ from . import networks
 from d2l import torch as d2l
 import torchvision
 
-class artvggAdaAttNModel(BaseModel):
+class artvggSelfAdaAttNModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -61,7 +61,7 @@ class artvggAdaAttNModel(BaseModel):
         # (30): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
         # content_image encoder
         content_image_encoder = torchvision.models.vgg19(pretrained=True).features
-        print(content_image_encoder)
+        # print(content_image_encoder)
         # content_image_encoder.load_state_dict(torch.load(opt.image_encoder_path))
         enc_layers = list(content_image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:2]).to(opt.gpu_ids[0]), opt.gpu_ids)
@@ -81,8 +81,8 @@ class artvggAdaAttNModel(BaseModel):
 
         # style image encoder
         style_image_encoder = torchvision.models.vgg19(pretrained=True)
-        style_image_encoder.classifier._modules['6'] = nn.Linear(4096, 24)
-        style_image_encoder.load_state_dict(torch.load(opt.style_encoder_path))
+        # style_image_encoder.classifier._modules['6'] = nn.Linear(4096, 24)
+        # style_image_encoder.load_state_dict(torch.load(opt.style_encoder_path))
         style_image_encoder = style_image_encoder.features
         enc_layers = list(style_image_encoder.children())
         enc_1 = nn.DataParallel(nn.Sequential(*enc_layers[:2]).to(opt.gpu_ids[0]), opt.gpu_ids)
@@ -96,22 +96,22 @@ class artvggAdaAttNModel(BaseModel):
                 param.requires_grad = False
 
         self.visual_names = ['c', 'cs', 's', 'c_org', 'cs_org', 's_org']#, 'edge_c', 'edge_cs', 'edge_s']
-        self.model_names = ['decoder', 'transformer']
+        self.model_names = ['decoder']
         parameters = []
         self.max_sample = 64 * 64
-        if opt.skip_connection_3:
-            adaattn_3 = networks.AdaAttN(in_planes=256, key_planes=256 + 128 + 64 if opt.shallow_layer else 256,
-                                              max_sample=self.max_sample)
-            self.net_adaattn_3 = networks.init_net(adaattn_3, opt.init_type, opt.init_gain, opt.gpu_ids)
-            self.model_names.append('adaattn_3')
-            parameters.append(self.net_adaattn_3.parameters())
-        if opt.shallow_layer:
-            channels = 512 + 256 + 128 + 64
-        else:
-            channels = 512
-        transformer = networks.Transformer(
-            in_planes=512, key_planes=channels, shallow_layer=opt.shallow_layer)
-        decoder = networks.Decoder(opt.skip_connection_3)
+        # if opt.skip_connection_3:
+        #     adaattn_3 = networks.AdaAttN(in_planes=256, key_planes=256 + 128 + 64 if opt.shallow_layer else 256,
+        #                                       max_sample=self.max_sample)
+        #     self.net_adaattn_3 = networks.init_net(adaattn_3, opt.init_type, opt.init_gain, opt.gpu_ids)
+        #     self.model_names.append('adaattn_3')
+        #     parameters.append(self.net_adaattn_3.parameters())
+        # if opt.shallow_layer:
+        #     channels = 512 + 256 + 128 + 64
+        # else:
+        #     channels = 512
+        # transformer = networks.Transformer(
+        #     in_planes=512, key_planes=channels, shallow_layer=opt.shallow_layer)
+        decoder = networks.SynDecoder([512, 512, 256, 128, 64, 3])
 
         # SD = torchvision.models.resnet18(pretrained=True)
         # SD.fc = nn.Linear(512, 1)
@@ -122,12 +122,14 @@ class artvggAdaAttNModel(BaseModel):
         # CD.sigmoid = nn.Sigmoid()
 
         self.net_decoder = networks.init_net(decoder, opt.init_type, opt.init_gain, opt.gpu_ids)
-        self.net_transformer = networks.init_net(transformer, opt.init_type, opt.init_gain, opt.gpu_ids)
+        # print(">>>>>>>>>>>>>>  ", *self.net_decoder.parameters())
+        # print(">>>>>>>>>>>>>>  ", *self.net_decoder.syn_blks[0].parameters())
+        # self.net_transformer = networks.init_net(transformer, opt.init_type, opt.init_gain, opt.gpu_ids)
         # self.net_SD = networks.init_net(SD, opt.init_type, opt.init_gain, opt.gpu_ids)
         # self.net_CD = networks.init_net(CD, opt.init_type, opt.init_gain, opt.gpu_ids)
 
         parameters.append(self.net_decoder.parameters())
-        parameters.append(self.net_transformer.parameters())
+        # parameters.append(self.net_transformer.parameters())
         self.c = None
         self.cs = None
         self.s = None
@@ -205,17 +207,17 @@ class artvggAdaAttNModel(BaseModel):
     def forward(self):
         self.c_feats = self.encode_with_intermediate(self.c, 'c')
         self.s_feats = self.encode_with_intermediate(self.s, 's')
-        if self.opt.skip_connection_3:
-            c_adain_feat_3 = self.net_adaattn_3(self.c_feats[2], self.s_feats[2], self.get_key(self.c_feats, 2, self.opt.shallow_layer),
-                                                   self.get_key(self.s_feats, 2, self.opt.shallow_layer), self.seed)
-        else:
-            c_adain_feat_3 = None
-        cs = self.net_transformer(self.c_feats[3], self.s_feats[3], self.c_feats[4], self.s_feats[4],
-                                  self.get_key(self.c_feats, 3, self.opt.shallow_layer),
-                                  self.get_key(self.s_feats, 3, self.opt.shallow_layer),
-                                  self.get_key(self.c_feats, 4, self.opt.shallow_layer),
-                                  self.get_key(self.s_feats, 4, self.opt.shallow_layer), self.seed)
-        self.cs = self.net_decoder(cs, c_adain_feat_3)
+        # if self.opt.skip_connection_3:
+        #     c_adain_feat_3 = self.net_adaattn_3(self.c_feats[2], self.s_feats[2], self.get_key(self.c_feats, 2, self.opt.shallow_layer),
+        #                                            self.get_key(self.s_feats, 2, self.opt.shallow_layer), self.seed)
+        # else:
+        #     c_adain_feat_3 = None
+        # cs = self.net_transformer(self.c_feats[3], self.s_feats[3], self.c_feats[4], self.s_feats[4],
+        #                           self.get_key(self.c_feats, 3, self.opt.shallow_layer),
+        #                           self.get_key(self.s_feats, 3, self.opt.shallow_layer),
+        #                           self.get_key(self.c_feats, 4, self.opt.shallow_layer),
+        #                           self.get_key(self.s_feats, 4, self.opt.shallow_layer), self.seed)
+        self.cs = self.net_decoder(self.c_feats, self.s_feats, self.seed)
         self.c_org = self.postprocess(self.c)
         self.cs_org= self.postprocess(self.cs)
         self.s_org = self.postprocess(self.s)

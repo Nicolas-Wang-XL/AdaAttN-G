@@ -1,0 +1,12 @@
+python test.py ^
+--content_path datasets/contents ^
+--style_path datasets/styles ^
+--name artvggAdaAttN_all_vgg19_2200_24class_relu1_with_normvgg_c_s_ --model artvggadaattn ^
+--dataset_mode unaligned ^
+--load_size 512 ^
+--crop_size 512 ^
+--style_encoder_path ./checkpoints\artvgg19_2200_24class_with_norm/latest_net_artvgg.pth ^
+--gpu_ids 0 ^
+--skip_connection_3 ^
+--shallow_layer ^
+--data_norm
