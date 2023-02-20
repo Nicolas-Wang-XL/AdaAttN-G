@@ -381,10 +381,9 @@ class SynDecoder(nn.Module):
         super(SynDecoder, self).__init__()
 
         for i in range(len(channels)-1):
-            # if(i>0 and i<3):
-            #     block = SynBlock(channels[i], channels[i+1])
-            # el
-            if(i == len(channels)-2):
+            if(i>0 and i<3):
+                block = SynBlock(channels[i], channels[i+1])
+            elif(i == len(channels)-2):
                 block = SynBlock(channels[i], channels[i+1], use_adain=True, use_us=False)
             else:
                 block = SynBlock(channels[i], channels[i+1], use_adain=True)

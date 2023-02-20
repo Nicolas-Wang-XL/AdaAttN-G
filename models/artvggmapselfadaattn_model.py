@@ -236,6 +236,7 @@ class artvggMapSelfAdaAttNModel(BaseModel):
         self.c_org = self.postprocess(self.c)
         self.cs_org= self.postprocess(self.cs)
         self.s_org = self.postprocess(self.s)
+        self.ap = self.net_artmap(self.c.shape)
 
     def compute_content_loss(self, stylized_feats):
         self.loss_content = torch.tensor(0., device=self.device)

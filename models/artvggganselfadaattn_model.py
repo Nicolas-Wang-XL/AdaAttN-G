@@ -15,6 +15,8 @@ class artvggGanSelfAdaAttNModel(BaseModel):
                             help='if specified, add skip connection on ReLU-3')
         parser.add_argument('--shallow_layer', action='store_true',
                             help='if specified, also use features of shallow layers')
+        parser.add_argument('--art_map', action='store_true',
+                            help='if specified, also use features of shallow layers')
         parser.add_argument('--data_norm',action='store_true',
                             help='img normazation to imagenet')
         if is_train:
@@ -32,6 +34,7 @@ class artvggGanSelfAdaAttNModel(BaseModel):
 
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
+        self.is_artmap = opt.art_map
         # (0): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         # (1): ReLU(inplace=True) # relu1-1
         # (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
@@ -101,6 +104,10 @@ class artvggGanSelfAdaAttNModel(BaseModel):
 
         self.visual_names = ['c', 'cs', 's', 'c_org', 'cs_org', 's_org']#, 'edge_c', 'edge_cs', 'edge_s']
         self.model_names = ['decoder', 'SD']
+        if self.is_artmap:
+            self.model_names.append('artmap')
+            self.visual_names.append('ap')
+
         parameters = []
         self.max_sample = 64 * 64
         # if opt.skip_connection_3:
@@ -140,6 +147,12 @@ class artvggGanSelfAdaAttNModel(BaseModel):
         SD.sigmoid = nn.Sigmoid()
         self.net_SD = networks.init_net(SD, opt.init_type, opt.init_gain, opt.gpu_ids)
 
+        artmap = networks.SynImage((1, 3, opt.crop_size, opt.crop_size))
+        self.net_artmap = networks.init_net(artmap, opt.init_type, opt.init_gain, opt.gpu_ids)
+        print(self.net_artmap.parameters())
+        if(self.is_artmap):
+            parameters.append(self.net_artmap.parameters())
+
         # parameters.append(self.net_transformer.parameters())
         self.c = None
         self.cs = None
@@ -149,18 +162,23 @@ class artvggGanSelfAdaAttNModel(BaseModel):
         self.c_org = None
         self.cs_org = None
         self.s_org = None
+        self.ap = None
         self.edge_c = None
         self.edge_cs = None
         self.edge_s = None
         self.s_feats = None
         self.c_feats = None
+        self.map_feats = None
         self.seed = 6666
         if self.isTrain:
             self.loss_names = ['content', 'global', 'local', 'G', 'D']#, 'edge']
             self.criterionMSE = torch.nn.MSELoss().to(self.device)
             # define loss functions
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
-            self.optimizer_g = torch.optim.Adam(itertools.chain(*parameters), lr=opt.lr)
+            if self.is_artmap:
+                self.optimizer_g = torch.optim.Adam(self.net_artmap.parameters(), lr=opt.lr)
+            else:
+                self.optimizer_g = torch.optim.Adam(itertools.chain(*parameters), lr=opt.lr)
             self.optimizer_D = torch.optim.Adam(self.net_SD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_g)
             self.loss_global = torch.tensor(0., device=self.device)
@@ -217,6 +235,7 @@ class artvggGanSelfAdaAttNModel(BaseModel):
 
     def forward(self):
         self.c_feats = self.encode_with_intermediate(self.c, 'c')
+        self.map_feats = self.encode_with_intermediate(self.net_artmap(self.c.shape), 's')
         self.s_feats = self.encode_with_intermediate(self.s, 's')
         # if self.opt.skip_connection_3:
         #     c_adain_feat_3 = self.net_adaattn_3(self.c_feats[2], self.s_feats[2], self.get_key(self.c_feats, 2, self.opt.shallow_layer),
@@ -228,10 +247,15 @@ class artvggGanSelfAdaAttNModel(BaseModel):
         #                           self.get_key(self.s_feats, 3, self.opt.shallow_layer),
         #                           self.get_key(self.c_feats, 4, self.opt.shallow_layer),
         #                           self.get_key(self.s_feats, 4, self.opt.shallow_layer), self.seed)
-        self.cs = self.net_decoder(self.c_feats, self.s_feats, self.seed)
+        if self.is_artmap:
+            self.cs = self.net_decoder(self.c_feats, self.map_feats, self.seed)
+        else:
+            self.cs = self.net_decoder(self.c_feats, self.s_feats, self.seed)
         self.c_org = self.postprocess(self.c)
         self.cs_org= self.postprocess(self.cs)
         self.s_org = self.postprocess(self.s)
+        self.ap = self.net_artmap(self.c.shape)
+        # print(torch.min(self.ap), torch.max(self.ap), networks.calc_mean_std(self.ap))
 
     def compute_content_loss(self, stylized_feats):
         self.loss_content = torch.tensor(0., device=self.device)
@@ -385,5 +409,6 @@ class artvggGanSelfAdaAttNModel(BaseModel):
         self.forward()
         self.optimize_G()
         self.optimize_D()
+        self.ap = self.net_artmap(self.c.shape)
 
 

@@ -1,6 +1,6 @@
 python test.py ^
---content_path datasets/contents ^
---style_path datasets/styles ^
+--content_path datasets/contents2 ^
+--style_path datasets/styles2 ^
 --name artvggSelfAdaAttN_without_artvgg_all_adain --model artvggselfadaattn ^
 --dataset_mode unaligned ^
 --load_size 512 ^

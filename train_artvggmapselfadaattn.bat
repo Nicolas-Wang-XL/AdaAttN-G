@@ -1,8 +1,8 @@
 python train.py ^
 --content_path "D:\MyProject\Dataset\coco2017\train2017" ^
---style_path "D:\MyProject\Dataset\wikiart" ^
---name artvggSelfAdaAttN_bicubicus_wikiart ^
---model artvggselfadaattn ^
+--style_path "D:\MyProject\Dataset\vangogh2photo\trainA" ^
+--name artvggSelfAdaAttN_bicubicus_vangogh ^
+--model artvggmapselfadaattn ^
 --dataset_mode unaligned ^
 --no_dropout ^
 --load_size 256 ^
@@ -10,8 +10,8 @@ python train.py ^
 --style_encoder_path ./checkpoints\artvgg19_2200_24class_with_norm/latest_net_artvgg.pth ^
 --gpu_ids 0 ^
 --batch_size 4 ^
---n_epochs 2 ^
---n_epochs_decay 3 ^
+--n_epochs 1 ^
+--n_epochs_decay 0 ^
 --display_freq 100 ^
 --display_port 8097 ^
 --display_env ArtvggSelfMapAdaAttN ^
@@ -22,4 +22,5 @@ python train.py ^
 --shallow_layer ^
 --skip_connection_3 ^
 --save_latest_freq 5000 ^
---data_norm
+--data_norm ^
+--continue_train
